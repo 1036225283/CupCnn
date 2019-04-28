@@ -56,7 +56,6 @@ public class FullConnectionLayer extends Layer{
 			//常量初始化b
 			MathFunctions.constantInitData(bData, 0.001f);
 		}
-		assert w!=null && b!=null:"FullConnectionLayer prepare---w or b is null error";
 		wGradient = new Blob(inSize,outSize);
 		bGradient = new Blob(outSize);
 		//z是个中间值，计算的时候要用到。
@@ -75,7 +74,7 @@ public class FullConnectionLayer extends Layer{
 		float[] zData = z.getData();
 		z.fillValue(0);
 		Vector<Task<Object>> workers = new Vector<Task<Object>>();
-		int batch = inputData.length/inSize;
+		int batch = mNetwork.getBatch();
 		for(int n=0;n<batch;n++){
 			workers.add(new Task<Object>(n) {
 				@Override
@@ -119,7 +118,7 @@ public class FullConnectionLayer extends Layer{
 		//update diff
 		//先乘激活函数的偏导数,即可求出当前层的误差
 		assert inputDiff.getSize()==z.getSize():"inputDiff.getSize()==z.getSize() error";
-		int batch = inputData.length/inSize;
+		int batch = mNetwork.getBatch();
 		Vector<Task<Object>> workers = new Vector<Task<Object>>();
 		if(activationFunc != null){
 			for(int n=0; n < batch;n++){
@@ -210,6 +209,8 @@ public class FullConnectionLayer extends Layer{
 			out.writeObject(b);
 			if(activationFunc != null){
 				out.writeUTF(activationFunc.getType());
+			}else {
+				out.writeUTF("none");
 			}
 		} catch (IOException e) {
 			// TODO Auto-generated catch block

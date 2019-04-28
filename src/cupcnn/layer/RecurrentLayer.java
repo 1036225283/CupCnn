@@ -11,11 +11,11 @@ public class RecurrentLayer extends Layer {
 	Network mNetwork;
 	Cell mCell;
 	int seqLen;
-	int batch;
 	int inSize;
-	int outSize;
+	int hidenSize;
+	public static final String TYPE = "RecurrentLayer";
 	
-	enum RecurrentType{
+	public static enum RecurrentType{
 		RNN,
 		LSTM,
 		GRU
@@ -26,33 +26,33 @@ public class RecurrentLayer extends Layer {
 	public RecurrentLayer(Network network) {
 		super(network);
 		// TODO Auto-generated constructor stub
+		this.mNetwork = network;
 	}
 	
-	public RecurrentLayer(Network network,RecurrentType type,int seqLen,int inSize,int outSize) {
-		super(network);
-		this.mNetwork = network;
-		this.batch = network.getBatch();
+	public RecurrentLayer(Network network,RecurrentType type,int seqLen,int inSize,int hidenSize) {
+		this(network);
+		this.seqLen = seqLen;
 		this.inSize = inSize;
-		this.outSize = outSize;
+		this.hidenSize = hidenSize;
 		this.type = type;
 	}
 
 	@Override
 	public Blob createOutBlob() {
 		// TODO Auto-generated method stub
-		return new Blob(seqLen,batch,outSize);
+		return new Blob(seqLen,mNetwork.getBatch()/seqLen,hidenSize);
 	}
 
 	@Override
 	public Blob createDiffBlob() {
 		// TODO Auto-generated method stub
-		return new Blob(seqLen,batch,outSize);
+		return new Blob(seqLen,mNetwork.getBatch()/seqLen,hidenSize);
 	}
 
 	@Override
 	public String getType() {
 		// TODO Auto-generated method stub
-		return "RecurrentLayer";
+		return TYPE;
 	}
 
 	@Override
@@ -60,7 +60,10 @@ public class RecurrentLayer extends Layer {
 		// TODO Auto-generated method stub
 		switch(type) {
 		case RNN:
-			mCell = new RnnCell(mNetwork);
+			if(mCell==null) {
+				mCell = new RnnCell(mNetwork,this,inSize,hidenSize);
+			}
+			mCell.prepare();
 			break;
 		case LSTM:
 			break;
@@ -76,19 +79,23 @@ public class RecurrentLayer extends Layer {
 		Blob output = mNetwork.getDatas().get(id);
 		float[] inputData = input.getData();
 		float[] outputData = output.getData();
-		Blob tmpIn = new Blob(batch,inSize);
-		Blob tmpOut = new Blob(batch,inSize);
+		Blob tmpIn = new Blob(mNetwork.getBatch()/seqLen,inSize);
+		Blob tmpOut = new Blob(mNetwork.getBatch()/seqLen,hidenSize);
 		for(int i=0;i<seqLen;i++) {
+			if(i==0) {
+				mCell.resetState();
+			}
 			float[] tmpInData = tmpIn.getData();
 			int tmpInSize = tmpIn.getSize();
+			//每次去取一个序列
 			for(int j=0;j<tmpInSize;j++) {
-				tmpInData[j] = inputData[seqLen*tmpInSize+j];
+				tmpInData[j] = inputData[i*tmpInSize+j];
 			}
 			mCell.forward(tmpIn,tmpOut);
 			float[] tmpOutData = tmpOut.getData();
 			int tmpOutSize = tmpOut.getSize();
 			for(int j=0;j<tmpOutSize;j++) {
-				outputData[seqLen*tmpOutSize+j] = tmpOutData[j];
+				outputData[i*tmpOutSize+j] = tmpOutData[j];
 			}
 		}
 	}
@@ -100,40 +107,37 @@ public class RecurrentLayer extends Layer {
 		Blob outputDiff = mNetwork.getDiffs().get(id-1);
 		Blob input = mNetwork.getDatas().get(id-1);
 		Blob output = mNetwork.getDatas().get(id);
-		Blob tmpIn = new Blob(batch,inSize);
-		Blob tmpOut = new Blob(batch,inSize);
-		Blob tmpInDiff = new Blob(batch,outSize);
-		Blob tmpOutDiff = new Blob(batch,inSize);
+		Blob tmpIn = new Blob(mNetwork.getBatch()/seqLen,inSize);
+		Blob tmpOut = new Blob(mNetwork.getBatch()/seqLen,hidenSize);
+		Blob tmpInDiff = new Blob(mNetwork.getBatch()/seqLen,hidenSize);
+		Blob tmpOutDiff = new Blob(mNetwork.getBatch()/seqLen,inSize);
 		float[] inputData = input.getData();
 		float[] outputData = output.getData();
 		float[] inputDiffData = inputDiff.getData();
 		float[] outputDiffData = outputDiff.getData();
 		for(int i=0;i<seqLen;i++) {
-			if(i==0) {
-				mCell.resetState(); 
-			}
 			//一次取序列中的一个
 			float[] tmpInData = tmpIn.getData();
 			int tmpInSize = tmpIn.getSize();
 			for(int j=0;j<tmpInSize;j++) {
-				tmpInData[j] = inputData[seqLen*tmpInSize+j];
+				tmpInData[j] = inputData[i*tmpInSize+j];
 			}
 			float[] tmpOutData = tmpOut.getData();
 			int tmpOutSize = tmpOut.getSize();
 			for(int j=0;j<tmpOutSize;j++) {
-				tmpOutData[j] = outputData[seqLen*tmpOutSize+j];
+				tmpOutData[j] = outputData[i*tmpOutSize+j];
 			}
 			float[] tmpInDiffData = tmpInDiff.getData();
-			int tmpInDiffSize = tmpIn.getSize();
+			int tmpInDiffSize = tmpInDiff.getSize();
 			for(int j=0;j<tmpInDiffSize;j++) {
-				tmpInDiffData[j] = inputData[seqLen*tmpInDiffSize+j];
+				tmpInDiffData[j] = inputDiffData[i*tmpInDiffSize+j];
 			}
 			mCell.backward(tmpIn,tmpOut,tmpInDiff,tmpOutDiff);
 			//将计算的结果按顺序拷贝回outputDiffBlob
 			float[] tmpOutDiffData = tmpOutDiff.getData();
 			int tmpOutDifftSize = tmpOutDiff.getSize();
 			for(int j=0;j<tmpOutDifftSize;j++) {
-				outputDiffData[seqLen*tmpOutDifftSize+j] = tmpOutDiffData[j];
+				outputDiffData[i*tmpOutDifftSize+j] = tmpOutDiffData[j];
 			}
 		}
 	}
@@ -145,7 +149,8 @@ public class RecurrentLayer extends Layer {
 			out.writeUTF(getType());
 			out.writeInt(seqLen);
 			out.writeInt(inSize);
-			out.writeInt(outSize);
+			out.writeInt(hidenSize);
+			mCell.saveModel(out);
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
@@ -158,11 +163,20 @@ public class RecurrentLayer extends Layer {
 		try {
 			seqLen = in.readInt();
 			inSize = in.readInt();
-			outSize = in.readInt();
+			hidenSize = in.readInt();
+			String type = in.readUTF();
+			if(type.equals("RNN")) {
+				this.type = RecurrentType.RNN;
+				mCell = new RnnCell(mNetwork,RecurrentLayer.this);
+				mCell.loadModel(in);
+			}
 		} catch (IOException e) {
 			// TODO Auto-generated catch block
 			e.printStackTrace();
 		}
 	}
 
+	public int getSeqLen() {
+		return seqLen;
+	}
 }
